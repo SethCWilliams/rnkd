@@ -1,59 +1,42 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
-from typing import Optional, List
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from typing import List
+from app.db.base import get_db
+from app.db.models import User as UserModel
+from app.db.schemas import UserRead, UserCreate
+import uuid
 
 router = APIRouter()
 
-class UserProfile(BaseModel):
-    id: int
-    name: str
-    email: str
-    profile_image_url: Optional[str] = None
-
-class UserProfileUpdate(BaseModel):
-    name: Optional[str] = None
-    profile_image_url: Optional[str] = None
-
-# Dummy user data
-DUMMY_USERS = {
-    1: {
-        "id": 1,
-        "name": "John Doe",
-        "email": "john@example.com",
-        "profile_image_url": None
-    },
-    2: {
-        "id": 2,
-        "name": "Jane Smith",
-        "email": "jane@example.com",
-        "profile_image_url": "https://example.com/avatar.jpg"
-    }
-}
-
-@router.get("/", response_model=List[UserProfile])
-async def get_users():
+@router.get("/", response_model=List[UserRead])
+async def get_users(db: Session = Depends(get_db)):
     """Get all users"""
-    return [UserProfile(**user) for user in DUMMY_USERS.values()]
+    users = db.query(UserModel).all()
+    return users
 
-@router.get("/{user_id}", response_model=UserProfile)
-async def get_user(user_id: int):
+@router.get("/{user_id}", response_model=UserRead)
+async def get_user(user_id: int, db: Session = Depends(get_db)):
     """Get user by ID"""
-    user = DUMMY_USERS.get(user_id)
+    user = db.query(UserModel).filter(UserModel.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return UserProfile(**user)
+    return user
 
-@router.put("/{user_id}", response_model=UserProfile)
-async def update_user(user_id: int, user_update: UserProfileUpdate):
-    """Update user profile"""
-    user = DUMMY_USERS.get(user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+@router.post("/", response_model=UserRead)
+async def create_user(user_data: UserCreate, db: Session = Depends(get_db)):
+    """Create a new user"""
+    # Check if email already exists
+    existing_user = db.query(UserModel).filter(UserModel.email == user_data.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Email already registered")
     
-    # Update user data
-    if user_update.name is not None:
-        user["name"] = user_update.name
-    if user_update.profile_image_url is not None:
-        user["profile_image_url"] = user_update.profile_image_url
-    
-    return UserProfile(**user) 
+    # Create new user
+    db_user = UserModel(
+        name=user_data.name,
+        email=user_data.email,
+        profile_image_url=user_data.profile_image_url
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    return db_user 

@@ -1,6 +1,10 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from app.db.base import get_db
+from app.db.models import MovieList as MovieListModel, MovieListItem as MovieListItemModel
+from app.db.schemas import MovieListRead, MovieListCreate, MovieListItemRead, MovieListItemCreate
 from pydantic import BaseModel
-from typing import Optional, List
 
 router = APIRouter()
 
@@ -19,19 +23,19 @@ class MovieSearch(BaseModel):
 class MovieList(BaseModel):
     id: int
     name: str
-    group_id: Optional[int] = None
+    group_id: Optional[int]
     created_by_user_id: int
-    type: str  # "group" or "personal"
-    status: str  # "open", "voting", "closed"
+    type: str
+    status: str
 
 class MovieListItem(BaseModel):
     id: int
     movie_list_id: int
     external_id: str
     title: str
-    metadata: dict
+    metadata: Optional[dict] = None
 
-# Dummy movie data
+# Dummy movie data for search (we'll keep this for now since we don't have TMDB integration yet)
 DUMMY_MOVIES = [
     {
         "id": 1,
@@ -80,41 +84,9 @@ DUMMY_MOVIES = [
     }
 ]
 
-# Dummy movie lists
-DUMMY_MOVIE_LISTS = {
-    1: {
-        "id": 1,
-        "name": "Classic Movies",
-        "group_id": 1,
-        "created_by_user_id": 1,
-        "type": "group",
-        "status": "open"
-    },
-    2: {
-        "id": 2,
-        "name": "My Watchlist",
-        "group_id": None,
-        "created_by_user_id": 1,
-        "type": "personal",
-        "status": "open"
-    }
-}
-
-# Dummy movie list items
-DUMMY_MOVIE_LIST_ITEMS = {
-    1: [
-        {"id": 1, "movie_list_id": 1, "external_id": "278", "title": "The Shawshank Redemption", "metadata": DUMMY_MOVIES[0]},
-        {"id": 2, "movie_list_id": 1, "external_id": "238", "title": "The Godfather", "metadata": DUMMY_MOVIES[1]}
-    ],
-    2: [
-        {"id": 3, "movie_list_id": 2, "external_id": "680", "title": "Pulp Fiction", "metadata": DUMMY_MOVIES[2]},
-        {"id": 4, "movie_list_id": 2, "external_id": "155", "title": "The Dark Knight", "metadata": DUMMY_MOVIES[3]}
-    ]
-}
-
 @router.get("/search", response_model=List[Movie])
 async def search_movies(query: str = ""):
-    """Search movies (dummy data)"""
+    """Search movies (dummy data for now)"""
     if not query:
         return DUMMY_MOVIES
     
@@ -124,55 +96,75 @@ async def search_movies(query: str = ""):
 
 @router.get("/popular", response_model=List[Movie])
 async def get_popular_movies():
-    """Get popular movies (dummy data)"""
+    """Get popular movies (dummy data for now)"""
     return DUMMY_MOVIES
 
 @router.get("/{movie_id}", response_model=Movie)
 async def get_movie(movie_id: int):
-    """Get movie by ID"""
+    """Get movie by ID (dummy data for now)"""
     movie = next((m for m in DUMMY_MOVIES if m["id"] == movie_id), None)
     if not movie:
         raise HTTPException(status_code=404, detail="Movie not found")
     return movie
 
-@router.get("/lists/", response_model=List[MovieList])
-async def get_movie_lists():
+@router.get("/lists/", response_model=List[MovieListRead])
+async def get_movie_lists(db: Session = Depends(get_db)):
     """Get all movie lists"""
-    return [MovieList(**list_data) for list_data in DUMMY_MOVIE_LISTS.values()]
+    lists = db.query(MovieListModel).all()
+    return lists
 
-@router.post("/lists/", response_model=MovieList)
-async def create_movie_list(list_data: dict):
+@router.post("/lists/", response_model=MovieListRead)
+async def create_movie_list(list_data: MovieListCreate, db: Session = Depends(get_db)):
     """Create a new movie list"""
-    new_list = {
-        "id": len(DUMMY_MOVIE_LISTS) + 1,
-        "name": list_data.get("name", "New List"),
-        "group_id": list_data.get("group_id"),
-        "created_by_user_id": 1,  # In real implementation, get from auth
-        "type": list_data.get("type", "personal"),
-        "status": "open"
-    }
-    DUMMY_MOVIE_LISTS[new_list["id"]] = new_list
-    DUMMY_MOVIE_LIST_ITEMS[new_list["id"]] = []
-    return MovieList(**new_list)
+    db_list = MovieListModel(
+        name=list_data.name,
+        group_id=list_data.group_id,
+        created_by_user_id=list_data.created_by_user_id,
+        type=list_data.type,
+        media_type=list_data.media_type,
+        status=list_data.status
+    )
+    db.add(db_list)
+    db.commit()
+    db.refresh(db_list)
+    return db_list
 
-@router.get("/lists/{list_id}/items", response_model=List[MovieListItem])
-async def get_movie_list_items(list_id: int):
+@router.get("/lists/{list_id}/items", response_model=List[MovieListItemRead])
+async def get_movie_list_items(list_id: int, db: Session = Depends(get_db)):
     """Get items in a movie list"""
-    items = DUMMY_MOVIE_LIST_ITEMS.get(list_id, [])
-    return [MovieListItem(**item) for item in items]
-
-@router.post("/lists/{list_id}/items")
-async def add_movie_to_list(list_id: int, movie_data: dict):
-    """Add movie to list"""
-    if list_id not in DUMMY_MOVIE_LIST_ITEMS:
+    # Check if list exists
+    movie_list = db.query(MovieListModel).filter(MovieListModel.id == list_id).first()
+    if not movie_list:
         raise HTTPException(status_code=404, detail="Movie list not found")
     
-    new_item = {
-        "id": len(DUMMY_MOVIE_LIST_ITEMS[list_id]) + 1,
-        "movie_list_id": list_id,
-        "external_id": movie_data["external_id"],
-        "title": movie_data["title"],
-        "metadata": movie_data.get("metadata", {})
-    }
-    DUMMY_MOVIE_LIST_ITEMS[list_id].append(new_item)
-    return MovieListItem(**new_item) 
+    items = db.query(MovieListItemModel).filter(MovieListItemModel.movie_list_id == list_id).all()
+    return items
+
+@router.post("/lists/{list_id}/items", response_model=MovieListItemRead)
+async def add_movie_to_list(list_id: int, movie_data: MovieListItemCreate, db: Session = Depends(get_db)):
+    """Add movie to list"""
+    # Check if list exists
+    movie_list = db.query(MovieListModel).filter(MovieListModel.id == list_id).first()
+    if not movie_list:
+        raise HTTPException(status_code=404, detail="Movie list not found")
+    
+    # Check if movie is already in the list
+    existing_item = db.query(MovieListItemModel).filter(
+        MovieListItemModel.movie_list_id == list_id,
+        MovieListItemModel.external_id == movie_data.external_id
+    ).first()
+    
+    if existing_item:
+        raise HTTPException(status_code=400, detail="Movie is already in this list")
+    
+    # Add movie to list
+    db_item = MovieListItemModel(
+        movie_list_id=list_id,
+        external_id=movie_data.external_id,
+        title=movie_data.title,
+        item_metadata=movie_data.item_metadata
+    )
+    db.add(db_item)
+    db.commit()
+    db.refresh(db_item)
+    return db_item 

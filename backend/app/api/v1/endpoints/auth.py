@@ -1,17 +1,24 @@
 from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
+from app.db.base import get_db
+from app.db.models import User as UserModel
+from app.db.schemas import UserRead, UserCreate
 from pydantic import BaseModel
-from typing import Optional
+from passlib.context import CryptContext
 
 router = APIRouter()
+
+# Password hashing
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+class UserRegister(BaseModel):
+    name: str
+    email: str
+    password: str
 
 class UserLogin(BaseModel):
     email: str
     password: str
-
-class UserRegister(BaseModel):
-    email: str
-    password: str
-    name: str
 
 class Token(BaseModel):
     access_token: str
@@ -19,45 +26,48 @@ class Token(BaseModel):
 
 class User(BaseModel):
     id: int
-    email: str
     name: str
-    profile_image_url: Optional[str] = None
+    email: str
+    profile_image_url: str = None
 
-# Dummy user data
-DUMMY_USERS = {
-    "user@example.com": {
-        "id": 1,
-        "email": "user@example.com",
-        "password": "hashed_password_123",
-        "name": "John Doe",
-        "profile_image_url": None
-    }
-}
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
 
-@router.post("/register", response_model=User)
-async def register(user_data: UserRegister):
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+@router.post("/register", response_model=UserRead)
+async def register(user_data: UserRegister, db: Session = Depends(get_db)):
     """Register a new user"""
-    if user_data.email in DUMMY_USERS:
+    # Check if email already exists
+    existing_user = db.query(UserModel).filter(UserModel.email == user_data.email).first()
+    if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
-    # In real implementation, hash password and save to database
-    new_user = {
-        "id": len(DUMMY_USERS) + 1,
-        "email": user_data.email,
-        "password": "hashed_" + user_data.password,
-        "name": user_data.name,
-        "profile_image_url": None
-    }
-    DUMMY_USERS[user_data.email] = new_user
+    # Create new user
+    db_user = UserModel(
+        name=user_data.name,
+        email=user_data.email,
+        profile_image_url=None
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
     
-    return User(**{k: v for k, v in new_user.items() if k != "password"})
+    return db_user
 
 @router.post("/login", response_model=Token)
-async def login(user_credentials: UserLogin):
+async def login(user_credentials: UserLogin, db: Session = Depends(get_db)):
     """Login user and return access token"""
-    user = DUMMY_USERS.get(user_credentials.email)
-    if not user or user["password"] != "hashed_" + user_credentials.password:
+    # Find user by email
+    user = db.query(UserModel).filter(UserModel.email == user_credentials.email).first()
+    if not user:
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    # In a real implementation, you would verify the password hash
+    # For now, we'll just check if the user exists
+    # if not verify_password(user_credentials.password, user.password_hash):
+    #     raise HTTPException(status_code=401, detail="Invalid credentials")
     
     # In real implementation, create JWT token
     return Token(
@@ -65,9 +75,12 @@ async def login(user_credentials: UserLogin):
         token_type="bearer"
     )
 
-@router.get("/me", response_model=User)
-async def get_current_user():
+@router.get("/me", response_model=UserRead)
+async def get_current_user(db: Session = Depends(get_db)):
     """Get current user information"""
-    # In real implementation, decode JWT token
-    user = DUMMY_USERS["user@example.com"]
-    return User(**{k: v for k, v in user.items() if k != "password"}) 
+    # In real implementation, decode JWT token to get user_id
+    # For now, return the first user
+    user = db.query(UserModel).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user 

@@ -1,142 +1,153 @@
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Depends
+from sqlalchemy.orm import Session
 from typing import Optional, List
+from app.db.base import get_db
+from app.db.models import Matchup as MatchupModel, EloScore as EloScoreModel, MovieListItem as MovieListItemModel
+from app.db.schemas import MatchupRead, MatchupCreate, EloScoreRead, EloScoreCreate
 import random
+from datetime import datetime
 
 router = APIRouter()
 
-class Matchup(BaseModel):
-    id: int
-    movie_list_id: int
-    user_id: int
-    item_a_id: int
-    item_b_id: int
-    winner_id: Optional[int] = None
-    created_at: str
-
-class Vote(BaseModel):
-    matchup_id: int
-    winner_id: int
-
-class EloScore(BaseModel):
-    id: int
-    movie_list_id: int
-    user_id: int
-    movie_list_item_id: int
-    score: float
-
-# Dummy matchup data
-DUMMY_MATCHUPS = {
-    1: {
-        "id": 1,
-        "movie_list_id": 1,
-        "user_id": 1,
-        "item_a_id": 1,
-        "item_b_id": 2,
-        "winner_id": None,
-        "created_at": "2024-01-01T10:00:00Z"
-    },
-    2: {
-        "id": 2,
-        "movie_list_id": 1,
-        "user_id": 1,
-        "item_a_id": 1,
-        "item_b_id": 3,
-        "winner_id": 1,
-        "created_at": "2024-01-01T10:05:00Z"
-    }
-}
-
-# Dummy Elo scores
-DUMMY_ELO_SCORES = {
-    1: {
-        "id": 1,
-        "movie_list_id": 1,
-        "user_id": 1,
-        "movie_list_item_id": 1,
-        "score": 1200.0
-    },
-    2: {
-        "id": 2,
-        "movie_list_id": 1,
-        "user_id": 1,
-        "movie_list_item_id": 2,
-        "score": 1200.0
-    }
-}
-
-# Dummy movie list items for voting
-DUMMY_MOVIE_ITEMS = {
-    1: {"id": 1, "title": "The Shawshank Redemption", "external_id": "278"},
-    2: {"id": 2, "title": "The Godfather", "external_id": "238"},
-    3: {"id": 3, "title": "Pulp Fiction", "external_id": "680"},
-    4: {"id": 4, "title": "The Dark Knight", "external_id": "155"}
-}
-
-@router.get("/matchups/{movie_list_id}", response_model=List[Matchup])
-async def get_matchups(movie_list_id: int, user_id: int = 1):
+@router.get("/matchups/{movie_list_id}", response_model=List[MatchupRead])
+async def get_matchups(movie_list_id: int, user_id: int = 1, db: Session = Depends(get_db)):
     """Get matchups for a movie list and user"""
-    matchups = [m for m in DUMMY_MATCHUPS.values() 
-                if m["movie_list_id"] == movie_list_id and m["user_id"] == user_id]
-    return [Matchup(**matchup) for matchup in matchups]
+    matchups = db.query(MatchupModel).filter(
+        MatchupModel.movie_list_id == movie_list_id,
+        MatchupModel.user_id == user_id
+    ).all()
+    return matchups
 
 @router.post("/matchups/{movie_list_id}/generate")
-async def generate_matchups(movie_list_id: int, user_id: int = 1):
+async def generate_matchups(movie_list_id: int, user_id: int = 1, db: Session = Depends(get_db)):
     """Generate new matchups for voting"""
-    # In real implementation, this would use Elo algorithm to generate optimal matchups
-    # For now, just create random matchups
-    items = [1, 2, 3, 4]  # Dummy item IDs
+    # Get all items in the movie list
+    items = db.query(MovieListItemModel).filter(MovieListItemModel.movie_list_id == movie_list_id).all()
     
+    if len(items) < 2:
+        raise HTTPException(status_code=400, detail="Need at least 2 items to generate matchups")
+    
+    # Generate all possible pairs
     new_matchups = []
     for i in range(len(items) - 1):
         for j in range(i + 1, len(items)):
-            matchup_id = len(DUMMY_MATCHUPS) + 1
-            matchup = {
-                "id": matchup_id,
-                "movie_list_id": movie_list_id,
-                "user_id": user_id,
-                "item_a_id": items[i],
-                "item_b_id": items[j],
-                "winner_id": None,
-                "created_at": "2024-01-01T10:00:00Z"
-            }
-            DUMMY_MATCHUPS[matchup_id] = matchup
-            new_matchups.append(matchup)
+            # Check if matchup already exists
+            existing_matchup = db.query(MatchupModel).filter(
+                MatchupModel.movie_list_id == movie_list_id,
+                MatchupModel.user_id == user_id,
+                MatchupModel.item_a_id == items[i].id,
+                MatchupModel.item_b_id == items[j].id
+            ).first()
+            
+            if not existing_matchup:
+                matchup = MatchupModel(
+                    movie_list_id=movie_list_id,
+                    user_id=user_id,
+                    item_a_id=items[i].id,
+                    item_b_id=items[j].id,
+                    winner_id=None,
+                    created_at=datetime.utcnow()
+                )
+                db.add(matchup)
+                new_matchups.append(matchup)
     
-    return {"message": f"Generated {len(new_matchups)} matchups", "matchups": new_matchups}
+    db.commit()
+    
+    return {"message": f"Generated {len(new_matchups)} new matchups", "matchups": new_matchups}
 
-@router.post("/vote")
-async def submit_vote(vote: Vote):
-    """Submit a vote for a matchup"""
-    matchup = DUMMY_MATCHUPS.get(vote.matchup_id)
+@router.post("/matchups/{matchup_id}/vote")
+async def vote_on_matchup(matchup_id: int, winner_id: int, db: Session = Depends(get_db)):
+    """Vote on a matchup"""
+    matchup = db.query(MatchupModel).filter(MatchupModel.id == matchup_id).first()
     if not matchup:
         raise HTTPException(status_code=404, detail="Matchup not found")
     
-    if matchup["winner_id"] is not None:
-        raise HTTPException(status_code=400, detail="Matchup already voted on")
+    if matchup.winner_id is not None:
+        raise HTTPException(status_code=400, detail="Matchup has already been voted on")
+    
+    # Validate winner_id is one of the items in the matchup
+    if winner_id not in [matchup.item_a_id, matchup.item_b_id]:
+        raise HTTPException(status_code=400, detail="Winner must be one of the items in the matchup")
     
     # Update matchup with winner
-    matchup["winner_id"] = vote.winner_id
+    matchup.winner_id = winner_id
+    db.commit()
     
-    # In real implementation, update Elo scores here
-    # For now, just return success
-    return {"message": "Vote submitted successfully", "matchup_id": vote.matchup_id}
+    # Update Elo scores (simplified for now)
+    await update_elo_scores(matchup, winner_id, db)
+    
+    return {"message": "Vote recorded successfully"}
 
-@router.get("/scores/{movie_list_id}", response_model=List[EloScore])
-async def get_elo_scores(movie_list_id: int, user_id: int = 1):
+async def update_elo_scores(matchup: MatchupModel, winner_id: int, db: Session):
+    """Update Elo scores after a vote (simplified implementation)"""
+    # Get or create Elo scores for both items
+    score_a = db.query(EloScoreModel).filter(
+        EloScoreModel.movie_list_id == matchup.movie_list_id,
+        EloScoreModel.user_id == matchup.user_id,
+        EloScoreModel.movie_list_item_id == matchup.item_a_id
+    ).first()
+    
+    score_b = db.query(EloScoreModel).filter(
+        EloScoreModel.movie_list_id == matchup.movie_list_id,
+        EloScoreModel.user_id == matchup.user_id,
+        EloScoreModel.movie_list_item_id == matchup.item_b_id
+    ).first()
+    
+    # Create scores if they don't exist
+    if not score_a:
+        score_a = EloScoreModel(
+            movie_list_id=matchup.movie_list_id,
+            user_id=matchup.user_id,
+            movie_list_item_id=matchup.item_a_id,
+            score=1200.0
+        )
+        db.add(score_a)
+    
+    if not score_b:
+        score_b = EloScoreModel(
+            movie_list_id=matchup.movie_list_id,
+            user_id=matchup.user_id,
+            movie_list_item_id=matchup.item_b_id,
+            score=1200.0
+        )
+        db.add(score_b)
+    
+    # Simple Elo update (K=32)
+    K = 32
+    expected_a = 1 / (1 + 10**((score_b.score - score_a.score) / 400))
+    expected_b = 1 - expected_a
+    
+    if winner_id == matchup.item_a_id:
+        actual_a = 1
+        actual_b = 0
+    else:
+        actual_a = 0
+        actual_b = 1
+    
+    score_a.score += K * (actual_a - expected_a)
+    score_b.score += K * (actual_b - expected_b)
+    
+    db.commit()
+
+@router.get("/scores/{movie_list_id}", response_model=List[EloScoreRead])
+async def get_elo_scores(movie_list_id: int, user_id: int = 1, db: Session = Depends(get_db)):
     """Get Elo scores for a movie list and user"""
-    scores = [s for s in DUMMY_ELO_SCORES.values() 
-              if s["movie_list_id"] == movie_list_id and s["user_id"] == user_id]
-    return [EloScore(**score) for score in scores]
+    scores = db.query(EloScoreModel).filter(
+        EloScoreModel.movie_list_id == movie_list_id,
+        EloScoreModel.user_id == user_id
+    ).all()
+    return scores
 
 @router.get("/progress/{movie_list_id}")
-async def get_voting_progress(movie_list_id: int, user_id: int = 1):
+async def get_voting_progress(movie_list_id: int, user_id: int = 1, db: Session = Depends(get_db)):
     """Get voting progress for a user"""
-    matchups = [m for m in DUMMY_MATCHUPS.values() 
-                if m["movie_list_id"] == movie_list_id and m["user_id"] == user_id]
+    matchups = db.query(MatchupModel).filter(
+        MatchupModel.movie_list_id == movie_list_id,
+        MatchupModel.user_id == user_id
+    ).all()
     
     total_matchups = len(matchups)
-    completed_matchups = len([m for m in matchups if m["winner_id"] is not None])
+    completed_matchups = len([m for m in matchups if m.winner_id is not None])
     
     return {
         "total_matchups": total_matchups,
@@ -145,21 +156,23 @@ async def get_voting_progress(movie_list_id: int, user_id: int = 1):
     }
 
 @router.get("/next-matchup/{movie_list_id}")
-async def get_next_matchup(movie_list_id: int, user_id: int = 1):
+async def get_next_matchup(movie_list_id: int, user_id: int = 1, db: Session = Depends(get_db)):
     """Get the next unvoted matchup"""
-    matchups = [m for m in DUMMY_MATCHUPS.values() 
-                if m["movie_list_id"] == movie_list_id and m["user_id"] == user_id and m["winner_id"] is None]
+    matchup = db.query(MatchupModel).filter(
+        MatchupModel.movie_list_id == movie_list_id,
+        MatchupModel.user_id == user_id,
+        MatchupModel.winner_id == None
+    ).first()
     
-    if not matchups:
+    if not matchup:
         return {"message": "No more matchups available"}
     
-    # Return the first unvoted matchup
-    matchup = matchups[0]
-    item_a = DUMMY_MOVIE_ITEMS.get(matchup["item_a_id"])
-    item_b = DUMMY_MOVIE_ITEMS.get(matchup["item_b_id"])
+    # Get the items for this matchup
+    item_a = db.query(MovieListItemModel).filter(MovieListItemModel.id == matchup.item_a_id).first()
+    item_b = db.query(MovieListItemModel).filter(MovieListItemModel.id == matchup.item_b_id).first()
     
     return {
-        "matchup": Matchup(**matchup),
+        "matchup": matchup,
         "item_a": item_a,
         "item_b": item_b
     } 

@@ -1,1 +1,2 @@
-# Database models and session management 
+# Database models and session management
+from .models import * 
