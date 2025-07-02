@@ -28,8 +28,8 @@ const Layout: React.FC = () => {
                                         key={item.name}
                                         to={item.href}
                                         className={`${item.current
-                                                ? 'border-accent-neon text-white'
-                                                : 'border-transparent text-dark-300 hover:text-white hover:border-dark-300'
+                                            ? 'border-accent-neon text-white'
+                                            : 'border-transparent text-dark-300 hover:text-white hover:border-dark-300'
                                             } inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium transition-colors duration-200`}
                                     >
                                         {item.name}
