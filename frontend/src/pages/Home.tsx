@@ -1,25 +1,11 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
+import Navbar from '../components/Navbar';
 
 const Home: React.FC = () => {
     return (
         <div className="min-h-screen bg-gradient-to-br from-dark-900 via-dark-800 to-dark-900">
-            {/* Navigation */}
-            <nav className="bg-dark-900/80 border-b border-dark-700 backdrop-blur-md sticky top-0 z-10">
-                <div className="max-w-full mx-auto px-8">
-                    <div className="flex justify-between h-16 items-center">
-                        <img src="/images/logo/full_logo_green.png" alt="Rnkd logo" className="h-32 object-contain" />
-                        <div className="flex items-center space-x-4">
-                            <Link to="/login" className="text-dark-300 hover:text-white transition-colors text-lg font-medium">
-                                Login
-                            </Link>
-                            <Link to="/register" className="btn-primary text-lg px-6 py-2 shadow-lg">
-                                Get Started
-                            </Link>
-                        </div>
-                    </div>
-                </div>
-            </nav>
+            <Navbar />
 
             {/* Hero Section with How Rnkd Works */}
             <section className="relative min-h-[calc(100vh-4rem)] flex flex-col items-center justify-start text-center overflow-hidden py-6">
