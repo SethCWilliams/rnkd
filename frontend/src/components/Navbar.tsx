@@ -82,7 +82,7 @@ const Navbar: React.FC = () => {
                                 >
                                     <div className="w-8 h-8 bg-accent-cyan rounded-full flex items-center justify-center">
                                         <span className="text-sm font-medium text-white">
-                                            {user?.name?.charAt(0) || 'U'}
+                                            {user?.name?.charAt(0)?.toUpperCase() || 'U'}
                                         </span>
                                     </div>
                                     <span className="text-sm font-medium">{user?.name}</span>
