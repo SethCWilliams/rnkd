@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { AuthProvider } from './contexts/AuthContext';
 import Layout from './components/Layout';
@@ -20,7 +20,7 @@ function App() {
                         <Route path="/" element={<Home />} />
                         <Route path="/login" element={<Login />} />
                         <Route path="/register" element={<Register />} />
-                        <Route path="/app" element={<Layout />}>
+                        <Route path="/app/*" element={<Layout />}>
                             <Route index element={<Dashboard />} />
                             <Route path="groups" element={<Groups />} />
                             <Route path="voting/:listId" element={<Voting />} />

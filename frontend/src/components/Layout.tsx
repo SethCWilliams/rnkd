@@ -11,11 +11,11 @@ const Layout: React.FC = () => {
     ];
 
     return (
-        <div className="min-h-screen bg-dark-900">
+        <div className="min-h-screen bg-dark-900 flex flex-col">
             <Navbar />
             
             {/* Sub-navigation for app pages */}
-            <nav className="bg-dark-800 border-b border-dark-700">
+            <nav className="bg-dark-800 border-b border-dark-700 flex-shrink-0">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
                     <div className="flex justify-center h-12">
                         <div className="flex space-x-8">
@@ -36,8 +36,10 @@ const Layout: React.FC = () => {
                 </div>
             </nav>
 
-            <main className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
-                <Outlet />
+            <main className="flex-1 overflow-y-auto">
+                <div className="max-w-7xl mx-auto py-6 sm:px-6 lg:px-8">
+                    <Outlet />
+                </div>
             </main>
         </div>
     );
