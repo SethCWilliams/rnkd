@@ -24,6 +24,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False, index=True)
+    password_hash = Column(String, nullable=False)
     profile_image_url = Column(String, nullable=True)
     groups = relationship('GroupUser', back_populates='user')
 
